@@ -91,7 +91,6 @@ def ensure_deps():
 ensure_deps()
 
 import requests
-from getpass import getpass
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
@@ -189,48 +188,27 @@ def pick_price(card_obj):
     return None
 
 # ---------------------------
-# TCGAPI Auth + Key creation
+# TCGAPI Auth + Key (optional)
 # ---------------------------
-def get_api_key_interactive(session: requests.Session):
+def get_api_key(session: requests.Session):
     """
-    Create / retrieve TCGAPI key.
-
-    Flow based on documented quickstart:
-    - POST /auth/login (store cookie)
-    - POST /keys with cookie to create key [4](https://tcgapi.dev/quickstart/)
+    Try to retrieve TCGAPI key from environment or config.
+    Returns None if not found (API calls will work without auth if supported).
     """
     # First, prefer env var
     env_key = os.environ.get("TCGAPI_KEY")
     if env_key:
+        print("[+] Using TCGAPI_KEY from environment variable")
         return env_key
 
     cfg = load_json(CONFIG_PATH, default={}) or {}
     if cfg.get("tcgapi_key"):
+        print("[+] Using TCGAPI_KEY from saved config")
         return cfg["tcgapi_key"]
 
-    print("TCGAPI key not found.")
-    print("We'll log in and create a key (the key is typically shown once, so we'll save it locally).")
-    email = input("TCGAPI email: ").strip()
-    pw = getpass("TCGAPI password (input hidden): ")
-
-    login_url = f"{TCGAPI_BASE}/auth/login"
-    r = session.post(login_url, json={"email": email, "password": pw}, timeout=30)
-    r.raise_for_status()
-
-    key_name = "swu-indexer"
-    keys_url = f"{TCGAPI_BASE}/keys"
-    r2 = session.post(keys_url, json={"name": key_name}, timeout=30)
-    r2.raise_for_status()
-    data = r2.json().get("data") or {}
-    key = data.get("key")
-    if not key:
-        raise RuntimeError("Key creation succeeded but no key returned in response.")
-
-    cfg["tcgapi_key"] = key
-    save_json(CONFIG_PATH, cfg)
-    print(f"[+] Saved API key to {CONFIG_PATH}")
-    print("    Tip: you can also set environment variable TCGAPI_KEY to avoid prompts.\n")
-    return key
+    print("[+] No TCGAPI key found. Attempting unauthenticated requests.")
+    print("[+] Note: If you hit rate limits, set TCGAPI_KEY environment variable.\n")
+    return None
 
 # ---------------------------
 # TCGAPI Data fetch (min calls)
@@ -521,7 +499,7 @@ def main():
 
     session = requests.Session()
 
-    api_key = get_api_key_interactive(session)
+    api_key = get_api_key(session)
 
     sets = list_sets(session, api_key, use_cache=not args.force_refresh)
     chosen = choose_set_interactive(sets)
