@@ -109,7 +109,8 @@ TCGAPI_BASE = "https://api.tcgapis.com/api/v1"
 
 SWUDB_SEARCH = "https://api.swu-db.com/cards/search"  # q=set:law, order=setnumber [3](https://docs.tcgplayer.com/docs/getting-started)
 
-GAME_SLUG = "star-wars-unlimited"
+# Star Wars Unlimited category ID (found via /games endpoint)
+SWU_CATEGORY_ID = None  # Will be discovered at runtime
 
 # ---------------------------
 # Local config/cache
@@ -217,57 +218,69 @@ def tcgapi_get(session, path, api_key=None, params=None):
     url = f"{TCGAPI_BASE}{path}"
     headers = {}
     if api_key:
-        headers["X-API-Key"] = api_key
+        headers["x-api-key"] = api_key
     r = session.get(url, headers=headers, params=params, timeout=30)
     r.raise_for_status()
     return r.json()
 
-def list_sets(session, api_key, use_cache=True):
+def discover_swu_category_id(session, api_key):
     """
-    GET /games/{slug}/sets (paged). [5](https://tcgapi.dev/api-explorer/)
+    GET /games to find Star Wars Unlimited's categoryId.
+    """
+    js = tcgapi_get(session, "/games", api_key=api_key)
+    games = js.get("data") or []
+    for game in games:
+        if "star wars" in (game.get("name", "").lower() or ""):
+            return game.get("categoryId")
+    return None
+
+def list_sets(session, api_key, category_id, use_cache=True):
+    """
+    GET /expansions/{categoryId} to list sets for Star Wars Unlimited.
     Cache for 7 days to avoid calls.
     """
-    cache_path = CACHE_DIR / f"{GAME_SLUG}_sets.json"
+    if not category_id:
+        raise RuntimeError("Star Wars Unlimited category ID not found")
+
+    cache_path = CACHE_DIR / f"swu_sets_{category_id}.json"
     cached = load_json(cache_path, default=None)
     if use_cache and cached and is_fresh(cached.get("_ts"), 7 * 24 * 3600):
         return cached["data"]
 
     all_sets = []
-    page = 1
-    per_page = 200
+    offset = 0
+    limit = 100
     while True:
-        js = tcgapi_get(session, f"/games/{GAME_SLUG}/sets", api_key=api_key, params={"page": page, "per_page": per_page})
+        js = tcgapi_get(session, f"/expansions/{category_id}", api_key=api_key, params={"offset": offset, "limit": limit})
         data = js.get("data") or []
-        meta = js.get("meta") or {}
         all_sets.extend(data)
-        if not meta.get("has_more"):
+        if len(data) < limit:
             break
-        page += 1
+        offset += limit
 
     save_json(cache_path, {"_ts": now_ts(), "data": all_sets})
     return all_sets
 
-def fetch_set_cards(session, api_key, set_id, force_refresh=False):
+def fetch_set_cards(session, api_key, group_id, force_refresh=False):
     """
-    GET /sets/:id/cards (paged). [2](https://tcgapi.dev/api/sets/)[6](https://github.com/gordy-ftw/tcgapi-js/blob/main/README.md)
-    Cache for 3 days by default (TCGAPI says many games refresh every ~3 days). [8](https://tcgapi.dev/)
+    GET /cards/{groupId} to fetch cards in an expansion (paged).
+    Cache for 3 days by default.
     """
-    cache_path = CACHE_DIR / f"set_{set_id}_cards.json"
+    cache_path = CACHE_DIR / f"cards_{group_id}.json"
     cached = load_json(cache_path, default=None)
     if not force_refresh and cached and is_fresh(cached.get("_ts"), 3 * 24 * 3600):
         return cached["data"]
 
     cards = []
-    page = 1
-    per_page = 200  # SDK docs mention a 200/page cap on iterate flows [6](https://github.com/gordy-ftw/tcgapi-js/blob/main/README.md)
+    offset = 0
+    limit = 100
     while True:
-        js = tcgapi_get(session, f"/sets/{set_id}/cards", api_key=api_key, params={"page": page, "per_page": per_page})
+        js = tcgapi_get(session, f"/cards/{group_id}", api_key=api_key, params={"offset": offset, "limit": limit})
         data = js.get("data") or []
-        meta = js.get("meta") or {}
         cards.extend(data)
-        if not meta.get("has_more"):
+        if len(data) < limit:
             break
-        page += 1
+        offset += limit
 
     save_json(cache_path, {"_ts": now_ts(), "data": cards})
     return cards
@@ -501,29 +514,36 @@ def main():
 
     api_key = get_api_key(session)
 
-    sets = list_sets(session, api_key, use_cache=not args.force_refresh)
+    print("[+] Discovering Star Wars Unlimited category ID...")
+    category_id = discover_swu_category_id(session, api_key)
+    if not category_id:
+        print("[!] Could not find Star Wars Unlimited in game list.")
+        sys.exit(1)
+    print(f"[+] Found Star Wars Unlimited (categoryId={category_id})")
+
+    sets = list_sets(session, api_key, category_id, use_cache=not args.force_refresh)
     chosen = choose_set_interactive(sets)
 
-    set_id = chosen.get("id")
+    group_id = chosen.get("groupId")
     set_name = chosen.get("name", "SWU Set")
     out_name = re.sub(r"[^A-Za-z0-9]+", "", set_name) + "Index.pdf"
     out_path = str(Path.cwd() / out_name)
 
-    print(f"\n[+] Selected: {set_name} (set_id={set_id})")
-    print("[+] Fetching TCGAPI set cards (cached if available)...")
-    tcg_cards = fetch_set_cards(session, api_key, set_id, force_refresh=args.force_refresh)
+    print(f"\n[+] Selected: {set_name} (groupId={group_id})")
+    print("[+] Fetching set cards (cached if available)...")
+    tcg_cards = fetch_set_cards(session, api_key, group_id, force_refresh=args.force_refresh)
 
     # Optional SWU-DB ordering
     guessed_code = (chosen.get("abbreviation") or "").lower()
-    swudb_code = input(f"\nOptional: SWU-DB set code for canonical ordering (ENTER to accept '{guessed_code}' or leave blank to skip): ").strip().lower()
-    if swudb_code == "":
+    swudb_code = input(f"\nOptional: SWU-DB set code for canonical ordering (ENTER to accept '{guessed_code}' or leave blank to skip): ").strip()
+    if not swudb_code:
         swudb_code = guessed_code
 
     base_cards = None
-    if swudb_code:
+    if swudb_code and swudb_code.strip():
         try:
             print(f"[+] Fetching base list from SWU-DB set:{swudb_code} ...")
-            base_cards = swudb_cards_for_set(swudb_code)
+            base_cards = swudb_cards_for_set(swudb_code.lower())
         except Exception as e:
             print(f"[!] SWU-DB fetch failed ({e}). Falling back to TCGAPI ordering.")
             base_cards = None

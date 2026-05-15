@@ -25,32 +25,31 @@ Then run the script again.
 
 ## TCGAPI Setup
 
-The script requires a free tcgapis.com account and API key to fetch card data.
+The script requires a tcgapis.com Hobby+ account and API key to access Star Wars Unlimited set data.
 
 ### Create a tcgapis.com Account
 1. Visit [https://tcgapis.com/](https://tcgapis.com/)
-2. Sign up for a free account
+2. Sign up for a Hobby+ account (free tier is available)
 3. Verify your email address
+4. Generate an API key from your dashboard
 
-### Generate an API Key
-On your first run, the script will prompt for your tcgapis.com email and password. It will then:
-1. Log in to your account
-2. Create an API key (typically shown once)
-3. Save the key locally to `~/.swu_indexer/config.json`
+### Use Your API Key
 
-Alternatively, you can create an API key manually via the tcgapis.com dashboard and set the environment variable:
+Set the API key as an environment variable before running the script:
 
 ```bash
 export TCGAPI_KEY="your_api_key_here"
 python3 ./swu_price_indexer.py
 ```
 
-The script will use the environment variable if set, avoiding the login prompt.
+Or the script will check for a saved key in `~/.swu_indexer/config.json`.
 
-### Free Tier Limits
-- tcgapis.com free tier allows reasonable API usage for personal projects
-- The script caches results for 3–7 days to minimize API calls
-- Use `--force-refresh` to bypass cache and refetch all data
+### API Requirements
+- **Free tier**: No API access (Hobby+ required)
+- **Hobby+ tier**: 300 requests/minute, 10,000/month
+- The script uses offset/limit pagination to minimize API calls
+- Results are cached for 3–7 days to reduce requests
+- Use `--force-refresh` to bypass cache
 
 For more details, see the [tcgapis.com documentation](https://tcgapis.com/documentation)
 
