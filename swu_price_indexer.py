@@ -101,11 +101,12 @@ from reportlab.lib.units import inch
 # ---------------------------
 # Endpoints (TCGAPI + SWU-DB)
 # ---------------------------
-TCGAPI_BASE = "https://api.tcgapi.dev/v1"
+TCGAPI_BASE = "https://api.tcgapis.com/api/v1"
 # Relevant documented endpoints:
-# - POST /auth/login and POST /keys to create API key (cookie session) [4](https://tcgapi.dev/quickstart/)
-# - GET /games/{slug}/sets to list sets [5](https://tcgapi.dev/api-explorer/)
-# - GET /sets/:id/cards to fetch cards in a set [2](https://tcgapi.dev/api/sets/)
+# - POST /auth/login and POST /keys to create API key (cookie session)
+# - GET /games/{slug}/sets to list sets
+# - GET /sets/:id/cards to fetch cards in a set
+# See: https://tcgapis.com/documentation
 
 SWUDB_SEARCH = "https://api.swu-db.com/cards/search"  # q=set:law, order=setnumber [3](https://docs.tcgplayer.com/docs/getting-started)
 
